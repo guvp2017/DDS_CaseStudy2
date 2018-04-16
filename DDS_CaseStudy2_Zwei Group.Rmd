@@ -1,0 +1,400 @@
+---
+title: "Talent Management Solutions to Prevent Employee Attrition"
+author: "Elisabet Zidow, Jonathan Franks, Shanqing Gu"
+date: "4/15/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+#### Executive Summary
+
+In this case study of employee attrition, our Zwei Group from DDSAnalytics use the given dataset to predict the top factors that contribute to this issue and address other intersting questions realted to job trends. The GLM and Random Forrest Models have higher accuracy than Neural Network, Cart, and LASSO models for attrition prediction. The top selected variables are Over Time, Business Travel, Marital Status (Single), Job Role (Sales), Age and Monthly Income. In addtion, we find that both Research Scientists and Sales Executives tend to have better education, work mainly in life science and medical fields, and do well with their marriage and careers. Unexpectedly, we also find stock option levels are different among single, married, and divorced. This inequality may need to be improved in the future.
+
+#### Introduction to Case Study
+
+Employee turnover (attrition) is the reduction of staff by voluntary or involuntary reasons. This is never good for business.
+
+Can we predict which employee is going to leave next month? Can we keep employee for longer time with a bonus program or promotion?  Our DDSAnalytics is specialized in providing talent management solutions to these questions
+
+With the given data (1,470 observations and 35 variables), we have identified answers to the following questions: (1) What are the top factors that contribute to turnover? (2) How about the job role specific trends? (3) What about other interesting trends and observations?
+
+#### Libraries used for Case Study
+```{r add_libs}
+library(ggplot2)
+library(caret)
+library(plyr)
+library(dplyr)
+library(visreg)
+library(glmnet)
+library(rpart)
+library(randomForest)
+library(nnet)
+library(devtools)
+library(rpart.plot)
+library(caret)
+library(neuralnet)
+```
+
+#### Get access to CaseStudy2.csv data
+```{r d1}
+cs2 <- read.csv("/Users/shanqinggu/Desktop/CaseStudy2.csv")
+apply(cs2,2,function(x) sum(is.na(x))) # check missing data
+str(cs2)
+```
+
+#### Exploratory Data Analysis
+```{r e1}
+nearZeroVar(cs2) 
+head(cs2[9])
+head(cs2[22])
+head(cs2[27])
+
+# These features with no variation are Over18, EmployeeCount and StandardHours
+# We will drop these fields
+# Additionally, EmployeeNumber is an integer but with no meaning for modeling 
+# We'll null it out as well, so that it doesn't negatively impact the model
+
+cs2$Over18 <- NULL
+cs2$EmployeeCount <- NULL
+cs2$StandardHours <- NULL
+cs2$EmployeeNumber <- NULL
+```
+
+
+#### OverTime is a likely candidate for driving attrition
+```{r e2}
+table(cs2$Attrition)
+
+# Calculation the frequencies
+prop.table(table(cs2$OverTime)) 
+
+# Calculate frequencies with ddply
+Overtime_per<- ddply(cs2,.(Attrition), 
+    function(x) with(x,
+      data.frame(100*round(table(OverTime)/length(OverTime),2))))
+head(Overtime_per) 
+
+# Plot categorical values against Attrition
+  ggplot(cs2, aes(Attrition, ..count.., fill = factor(OverTime))) + geom_bar(position="dodge")
+  ggplot(cs2, aes(Attrition, ..count.., fill = factor(BusinessTravel))) + geom_bar(position="dodge") 
+  ggplot(cs2, aes(Attrition, ..count.., fill = factor(EducationField))) + geom_bar(position="dodge") 
+  ggplot(cs2, aes(Attrition, ..count.., fill = factor(JobRole))) + geom_bar(position="dodge") 
+  ggplot(cs2, aes(Attrition, ..count.., fill = factor(MaritalStatus))) + geom_bar(position="dodge") 
+  ggplot(cs2, aes(Attrition, ..count.., fill = factor(MaritalStatus))) + geom_bar(position="dodge") + geom_text(stat='count', aes(label= ..count.., group=MaritalStatus), position=position_dodge(width=1), size=4)
+  
+```
+
+```{r e3_frequencies}
+OverTime_per<- ddply(cs2,.(Attrition), 
+    function(x) with(x,
+      data.frame(100*round(table(OverTime)/length(OverTime),2))))
+print(OverTime_per)
+
+BizTravel_per<- ddply(cs2,.(Attrition), 
+    function(x) with(x,
+      data.frame(100*round(table(BusinessTravel)/length(BusinessTravel),2))))
+print(BizTravel_per)
+
+Ed_per<- ddply(cs2,.(Attrition), 
+    function(x) with(x,
+      data.frame(100*round(table(EducationField)/length(EducationField),2))))
+print(Ed_per)
+
+JobRole_per<- ddply(cs2,.(Attrition), 
+    function(x) with(x,
+      data.frame(100*round(table(JobRole)/length(JobRole),2))))
+print(JobRole_per)
+
+Marriage_per<- ddply(cs2,.(Attrition), 
+    function(x) with(x,
+      data.frame(100*round(table(MaritalStatus)/length(MaritalStatus),2))))
+print(Marriage_per)
+```
+
+```{r e4}
+summary(cs2$MonthlyIncome)
+
+# Cut income into decile groups
+IncomeDeciles <- cut(cs2$MonthlyIncome, 10, include.lowest = TRUE, labels=c(1,2,3,4,5,6,7,8,9,10))
+
+ggplot(cs2, aes(IncomeDeciles, ..count.., fill = factor(Attrition))) + geom_bar(position="dodge") + labs(title= "Lowest Deciles Show High Attrition ")
+
+TtlWkgYrs <- cut(cs2$TotalWorkingYears, 10, include.lowest = TRUE)
+ggplot(cs2, aes(TtlWkgYrs, ..count.., fill = factor(Attrition))) +
+labs(title= "Attrition Declines over Time") + geom_bar(position="dodge")
+```
+
+
+####  GLM model of this data after removing 3 variables (EmployeeCount, Over18, StandardHours) due to less than 2 levels
+
+```{r s2}
+cs2.glm <- glm(formula = Attrition ~., family="binomial" , data=cs2[, -c(9, 22, 27)])
+cs2.glm.summary <-summary(cs2.glm)
+cs2.glm.summary
+
+data.frame(cs2.glm.summary$coef[cs2.glm.summary$coef[,4] <= .05, 4])
+
+predVal <- predict(cs2.glm, type="response") # predicted values
+ 
+fitted.results.cat <- ifelse(predVal > 0.5, "Yes", "No")
+fitted.results.cat <- as.factor(fitted.results.cat)
+ 
+require(caret)
+cm <- confusionMatrix(data=fitted.results.cat, reference = cs2$Attrition)
+ 
+glmAcc <- cm$overall[1]
+print(glmAcc)
+```
+
+#### List 3 top factor that contribute to turnover: BusinessTravel$Frequently, MartialStatus$Single, OverTime.
+
+```{r s3}
+par(mfrow=c(2,2))
+
+visreg(cs2.glm, c("OverTime","MaritalStatus","BusinessTravel","JobLevel"), scale="response")
+```
+
+#### Try glmnet (lasso and elastic-net regulated generalized linear models) 
+
+```{r s4}
+
+ y=cs2$Attrition
+ x=model.matrix(Attrition~., cs2[, -c(9, 22, 27)])
+ 
+ cvfit_a <- cv.glmnet(x, y, family = "binomial", nfolds=10, type.measure = "class", nlambda=200)
+ cvfit_b <- cv.glmnet(x, y, family = "binomial", nfolds=10, type.measure = "auc", nlambda=200)
+ 
+ plot(cvfit_a) # show cross-validation curve (red dotted line)
+ plot(cvfit_b)
+ 
+ coef(cvfit_a, s = "lambda.min")
+ coef(cvfit_b, s = "lambda.min")
+ 
+ fit.pred_a <- predict(cvfit_a, newx = x, type = "response")
+ fit.pred_b <- predict(cvfit_b, newx = x, type = "response")
+ 
+ #Create ROC curves
+ library(ROCR)
+ 
+ pred <- prediction(fit.pred_b[,1], y)
+ roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+ auc.perf <- performance(pred, measure = "auc")
+ auc.perf <- auc.perf@y.values
+ 
+ #Plot ROC
+ plot(roc.perf, measure = "tpr", x.measure = "fpr", main="ROC Curve", col="darkmagenta", lwd=3)
+ abline(a=0, b= 1, lwd=2, lty=2) # Ref line indicating poor performance
+ text(x = .40, y = .6, paste("AUC = ", round(auc.perf[[1]],2), sep = ""))
+
+table(cs2$Attrition)
+1233/nrow(cs2)
+```
+
+### Create Training and Test Data Sets
+```{r s6}
+# Remove NA/NULL Rows to prevent contrast/factor errors in modeling
+rem <- c(9,10,22,27)
+dat <-cs2[,-rem]
+dim(dat)
+indexes = sample(1:nrow(cs2), size=0.2*nrow(cs2))
+test = dat[indexes,]
+dim(test)  
+train = dat[-indexes,]
+dim(train)
+```
+
+### Create Cart Model
+```{r s7}
+modelCart = rpart(train$Attrition ~ ., data=train, method="class")
+#Plot the model
+prp(modelCart, box.palette = "skyblue", tweak = 1.2)
+
+#Predict the test data
+predictionCart <- predict(modelCart, newdata=test, type="class")
+
+#CART Accuracy
+#Confusion matrix 
+t1 <- table(test$Attrition, predictionCart)
+
+#CART model accuracy
+(t1[1]+t1[4])/(nrow(test))
+
+```
+
+#### Create Random Forrest Model
+
+```{r s8}
+modelRf = randomForest(Attrition ~ ., data=train, ntree = 100, mtry = 5, importance = TRUE, method="class")
+
+# Plot the model
+print(modelRf)
+
+#OOB vs No. Of Trees
+plot(modelRf, main="")
+legend("topright", c("OOB", "0", "1"), text.col=1:6, lty=1:3, col=1:3)
+title(main="Error Rates Random Forest")
+
+## List the importance of the variables.
+impVar <- round(randomForest::importance(modelRf), 2)
+impVar[order(impVar[,3], decreasing=TRUE),]
+```
+
+#### Random Forest with test data
+
+```{r s9}
+## Tuning Random Forest
+tunedRf <- tuneRF(x = train[,-2], 
+              y=as.factor(train$Attrition),
+              mtryStart = 5, 
+              ntreeTry=60, 
+              stepFactor = 2, 
+              improve = 0.001, 
+              trace=TRUE, 
+              plot = TRUE,
+              doBest = TRUE,
+              nodesize = 5, 
+              importance=TRUE
+)
+
+impvarTunedRf <- tunedRf$importance
+impvarTunedRf[order(impvarTunedRf[,3], decreasing=TRUE),]
+
+predictionRf <- predict(tunedRf, test, type="class")
+
+#RandomForest Accuracy
+#Confusion matrix 
+t2 <- table(test$Attrition, predictionRf)
+
+#RandomForest model accuracy
+(t2[1]+t2[4])/(nrow(test))
+```
+
+
+#### Martial Status Influence Factors (significant)
+
+```{r ms}
+# QOI_1: Martial Status Influence Factors
+cs_ms.glm <- glm(formula = MaritalStatus ~., family="binomial" , data=cs2[, -c(9, 22, 27)]) # Only StockOptionLevel is significant
+plot(cs2$MaritalStatus, cs2$StockOptionLevel, type="h", col="pink", lwd=1, ylab="Stock Option Level", main="Martial Status and Stock Option Level")
+```
+
+#### Job Role Trends
+```{r j1}
+# QOI_2: Job Roles and Education Levels
+cs2$Education <- as.factor(cs2$Education)
+dt <- table(cs2$JobRole, cs2$Education)
+
+# chisq.test(dt)
+balloonplot(t(dt), main ="Job Roles and Education Levels", xlab ="", ylab="", label = TRUE, show.margins = TRUE, dotsize=6/max(strwidth(19),strheight(19)), dotchar=19, dotcolor="pink", text.size=1, text.color=par("fg"))
+library(graphics)
+mosaicplot(dt, shade = TRUE, las=2, main = "Job Roles and Education Levels")
+
+library(vcd)
+assoc(head(dt), shade = T, las=3)
+```
+
+#### J1-J6
+```{r j2}
+
+par(mfrow=c(2,2))
+
+# J1: Job Roles and Education Levels  
+cs2$Education <- as.factor(cs2$Education)
+dt <- table(cs2$JobRole, cs2$Education)
+
+balloonplot(t(dt), main ="Job Roles and Education Levels", xlab ="", ylab="", label = TRUE, show.margins = TRUE, dotsize=6/max(strwidth(19),strheight(19)), dotchar=19, dotcolor="pink", text.size=1, text.color=par("fg"))
+
+# J2: Job Roles and Departments 
+dt2 <- table(cs2$JobRole, cs2$Department)
+
+balloonplot(t(dt2), main ="Job Roles and Departments", xlab ="", ylab="", label = TRUE, show.margins = TRUE, dotsize=6/max(strwidth(19),strheight(19)), dotchar=19, dotcolor="yellow", text.size=1, text.color=par("fg"))
+
+# J3: Job Roles and Education Fields 
+dt3 <- table(cs2$JobRole, cs2$EducationField)
+
+balloonplot(t(dt3), main ="Job Roles and Education Fields", xlab ="", ylab="", label = TRUE, show.margins = TRUE, dotsize=6/max(strwidth(19),strheight(19)), dotchar=19, dotcolor="cyan", text.size=1, text.color=par("fg"))
+
+# J4: Job Roles and Job Satisfaction 
+dt4 <- table(cs2$JobRole, cs2$JobSatisfaction)
+balloonplot(t(dt4), main ="Job Roles and Job Satisfaction", xlab ="", ylab="", label = TRUE, show.margins = TRUE, dotsize=4/max(strwidth(19),strheight(19)), dotchar=19, dotcolor="pink", text.size=1.0, text.color=par("fg"))
+
+# J5: Job Roles and MaritalStatus
+dt5 <- table(cs2$JobRole, cs2$MaritalStatus)
+balloonplot(t(dt5), main ="Job Roles and MaritalStatus", xlab ="", ylab="", label = TRUE, show.margins = TRUE, dotsize=6/max(strwidth(19),strheight(19)), dotchar=19, dotcolor="yellow", text.size=1.0, text.color=par("fg"))
+```
+
+#### J6
+```{r j3}
+# J6: Jon Role and Monthly Income
+par(mar = c(12, 10, 4, 2) + 0.1)
+boxplot(MonthlyIncome~JobRole,cs2,las=2, cex.axis = 1.0, horizontal=FALSE, main="Job Role and Monthly Income")
+```
+
+#### Step_nn: Neural Network Model
+
+```{r nn}
+
+# neural network model
+# dependant variable "Attrition" as binary variable, categorical variables and numeric varialbes as independant varialbes                      # To recode each n level categorical variable to n variables with values of 1 or 0, to normalization each numeric variables to a scale between (0,1) or (-1,1); 
+
+# 1) input data;
+
+cs<-read.csv('/Users/shanqinggu/Desktop/CaseStudy2.csv')
+
+# 2) checking with missing value, including data review;
+summary(cs)
+str(cs)
+
+# 3) checking the class of each variable;
+sapply(cs,class)
+
+# 4) select the categorical variables with class=factor; 
+cs1<-cs[,sapply(cs,class)=='factor']
+head(cs1)
+
+# 5) recode the categorical variable to mutilple variables with 1 or 0 values;
+cs1_recode<-model.matrix(~.+0,data=cs1[,-8])
+
+# 6) select numeric variables with class=integor;
+cs2<-cs[,sapply(cs,class)=='integer']
+head(cs2)
+
+# 7) normalization the numerical variables into scale (0,1);
+maxs <- apply(cs2, 2, max) 
+mins<-apply(cs2,2,min)
+scales<-as.data.frame(scale(cs2,center=mins,scale=maxs-mins))
+
+# 8) combine all the recoded categorical varialbes and normalized numeric variables;
+cs_n<-cbind(cs1_recode,scales)
+cs_n<-cs_n[,-c(28,41)] ### remove "NA" varialbes;
+colnames(cs_n)[c(1,2)]<-c("v1","v2") ### rename output variables;
+names(cs_n) <- c(names(cs_n)[3:47],"v1","v2") ### string the varialbe names;
+names(cs_n) <- gsub(" ", "_", names(cs_n))
+names(cs_n) <- gsub("_&_", "_", names(cs_n))
+n<-names(cs_n)
+f <- as.formula(paste("v1+v2 ~", paste(n[!n %in% c("v1","v2")], collapse = "+")))
+
+library(neuralnet)
+model_1 <- neuralnet(f, data = cs_n, hidden = 27,act.fct="logistic",linear.output=FALSE,lifesign="minimal")
+plot(model_1)
+
+# 9) split new data set into train and test data;
+index <- sample(1:nrow(cs_n),round(0.75*nrow(cs_n)))
+train <- cs_n[index,]
+test <- cs_n[-index,]
+
+model_2 <- neuralnet(f, data = train, hidden = 33,act.fct="logistic",linear.output=FALSE,lifesign="minimal")
+plot(model_2)
+
+# 10) accuracy
+pr.nn <- compute(model_1, train[, 1:45])
+pr.nn_<-pr.nn$net.result
+orv<-max.col(train[,c(46,47)])
+pr.nn_max<-max.col(pr.nn_)
+mean(pr.nn_max==orv)
+```
+
