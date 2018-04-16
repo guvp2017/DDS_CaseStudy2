@@ -1,3 +1,4 @@
 # DDS_CaseStudy2
 Talent Management Solutions to Prevent Employee Attrition
+
 In this case study of employee attrition, our Zwei Group from DDSAnalytics use the given dataset to predict the top factors that contribute to this issue and address other intersting questions realted to job trends. The GLM and Random Forrest Models have higher accuracy than Neural Network, Cart, and LASSO models for attrition prediction. The top selected variables are Over Time, Business Travel, Marital Status (Single), Job Role (Sales), Age and Monthly Income. In addtion, we find that both Research Scientists and Sales Executives tend to have better education, work mainly in life science and medical fields, and do well with their marriage and careers. Unexpectedly, we also find stock option levels are different among single, married, and divorced. This inequality may need to be improved in the future.
